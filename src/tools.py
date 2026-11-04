@@ -38,7 +38,7 @@ def extract_instagram_handles(text: str) -> list[str]:
         if not h or h in RESERVED or h in seen:
             continue
         seen.add(h)
-        handles.append(h)
+        handles.append(f"www.instagram.com/{h}")
     return handles
 
 def instagram_details_finder(url:list[str]):
@@ -109,36 +109,76 @@ def instagram_influencer_finder():
 
 
 def Youtube_creator_finder():
-    QUERIES = ["GRWM India", "affordable makeup haul", "skincare routine Hindi", "lehenga lookbook", "drugstore skincare India"]
-    seen=set()
-    creator_info=[]
-    for q in QUERIES:
-        token=None
-        for _ in range(2):
-            response=requests.get(url='https://www.googleapis.com/youtube/v3/search',params={
-            'part':'snippet',
-            'q':q,
-            'type':'video',
-            'max_results':10,
-            'regionCode':'IN',
-            'publishedAfter':'2026-05-04',
-            'publishedBefore': datetime.now(timezone.utc).isoformat(),
-            'pageToken':token
-        })
-            result=response.json()
-            for item in result['items']:
-                cid = item["snippet"]["channelId"]
-                if cid in seen:
-                    continue
-                seen.add(cid)
-                snip=item['snippet']
-                desc=snip.get('description',"")
-                if not extract_instagram_handles(desc):
-                    continue
-                creator_info.extend(extract_instagram_handles(desc))
-            token=result.get('nextPageToken')
-            if not token:
-                break
+  QUERIES = [
+      "GRWM India",
+      "affordable makeup haul",
+      "skincare routine Hindi",
+      "lehenga lookbook",
+      "drugstore skincare India",
+  ]
+  seen = set()
+  creator_info = []
+
+  api_key = os.getenv("YT_API_KEY")
+  if not api_key:
+    print("Error: YT_API_KEY environment variable is not set!")
     return creator_info
 
-Youtube_creator_finder()
+  for q in QUERIES:
+    token = None
+    for _ in range(2):
+      search_resp = requests.get(
+          url="https://www.googleapis.com/youtube/v3/search",
+          params={
+              "part": "id,snippet",
+              "q": q,
+              "type": "video",
+              "maxResults": 50,
+              "regionCode": "IN",
+              "publishedAfter": "2026-05-04T00:00:00Z",
+              "publishedBefore": datetime.now(timezone.utc).isoformat(),
+              "pageToken": token,
+              "key": api_key,
+          },
+      ).json()
+      items = search_resp.get("items", [])
+      if not items:
+        break
+
+      video_ids = []
+      for item in items:
+        vid = item.get("id", {}).get("videoId")
+        if vid:
+          video_ids.append(vid)
+
+      if not video_ids:
+        continue
+
+      for i in range(0, len(video_ids), 50):
+        batch_ids = ",".join(video_ids[i : i + 50])
+        details_resp = requests.get(
+            url="https://www.googleapis.com/youtube/v3/videos",
+            params={"part": "snippet", "id": batch_ids, "key": api_key},
+        ).json()
+
+        for v_item in details_resp.get("items", []):
+          snip = v_item["snippet"]
+          cid = snip.get("channelId")
+
+          if cid in seen:
+            continue
+
+          desc = snip.get("description", "")
+          handles = extract_instagram_handles(desc)
+
+          if not handles:
+            continue
+
+          seen.add(cid)
+          creator_info.extend(handles)
+
+      token = search_resp.get("nextPageToken")
+      if not token:
+        break
+
+  return creator_info
