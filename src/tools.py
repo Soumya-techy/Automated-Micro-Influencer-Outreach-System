@@ -4,7 +4,19 @@ import re
 from dotenv import load_dotenv
 from datetime import datetime,timezone
 import requests
+from pymongo import MongoClient
+from google.oauth2.credentials import Credentials
+from google.auth.transport.requests import Request
+import base64
+from email.mime.text import MIMEText
+from google_auth_oauthlib.flow import InstalledAppFlow
+from googleapiclient.discovery import build
 load_dotenv()
+
+client=MongoClient('mongodb://localhost:27017/')
+db=client['Influencer_data']
+collection1=db['Aceepted']
+collection2=db['Rejected']
 
 def extract_emails_from_bio(bio_text):
     email_pattern = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
@@ -41,6 +53,13 @@ def extract_instagram_handles(text: str) -> list[str]:
         handles.append(f"www.instagram.com/{h}")
     return handles
 
+def calc_engagement(posts, followers):
+    posts = posts[:5]
+    if not posts or not followers:
+        return 0.0
+    total = sum(max(p.get("likesCount") or 0, 0) + (p.get("commentsCount") or 0) for p in posts)
+    return (total / len(posts)) / followers 
+
 def instagram_details_finder(url:list[str]):
     creator_info=[]
     seen=set()
@@ -57,35 +76,38 @@ def instagram_details_finder(url:list[str]):
     dataset_id=run.default_dataset_id
     dataset=client.dataset(dataset_id=dataset_id).list_items().items
     for item in dataset:
-        posts = item.get("latestIgtvVideos", [])
-        post_caption=item.get('latestIgtvVideos',[])
-        if post_caption:
-            caption=post_caption[0].get('caption',"")
+        posts = item.get("latestPosts", [])
+        followers=item.get("followersCount",0)
+        if posts:
+            caption=posts[0].get('caption',"")
     
-        total_likes = sum(p.get("likesCount", 0) for p in posts)
-        total_comments = sum(p.get("commentsCount", 0) for p in posts)
-        total_views = sum(p.get("videoViewCount", 0) for p in posts)
-    
-        engagement = (total_likes + total_comments) / total_views if total_views > 0 else 0.0
-        contact=extract_emails_from_bio(bio_text=item["biography"])
+        engagement = calc_engagement(posts=posts,followers=followers)
 
-        if item['followersCount']<5000 or item['followersCount']>100000 or engagement<0.03 or len(extract_emails_from_bio(item['biography']))==0:
+        contact=extract_emails_from_bio(bio_text=item.get('biography',""))
+
+        if item.get('followersCount',0)<5000 or item.get('followersCount',0)>250000 or engagement<0.1 or len(contact)==0:
+            collection2.insert_one({"url": f'www.instagram.com/{item.get("username")}',
+                                    "full_name": item.get("fullName"),
+                                    'followers_issue':item.get('followersCount',0)<5000 or item.get('followersCount',0)>250000,
+                                    'engagement_issue':engagement<0.1,
+                                    'contact_found_issue':True if len(contact)==0 else False})
             continue
-        if contact in seen:
+        if contact in list(collection1.find({},{'contact':1, "_id":0})):
             continue
         seen.add(contact)
         creator_dict = {
-            "url": item.get("username"),
+            "url": f'www.instagram.com/{item.get("username")}',
             "full_name": item.get("fullName"),
             "followers": item.get("followersCount"),
             'contact': contact,
             "engagement": engagement,
             'latest_reel_caption': caption,
-            'Platform': 'Youtube',
             'Contacted': False
         }
     
         creator_info.append(creator_dict)
+    if creator_info:
+        collection1.insert_many(creator_info)
     return creator_info
 
 def instagram_influencer_finder():
@@ -94,7 +116,7 @@ def instagram_influencer_finder():
   "hashtags": [
     "beauty","makeup","glowup","skincare","fashion"
   ],
-  "maxInfluencers": 50,
+  "maxInfluencers": 12,
   "minFollowers": 500,
   "crawlWebsite": False,
   "product": "instagram-influencers"
@@ -103,7 +125,7 @@ def instagram_influencer_finder():
     dataset_id=run.default_dataset_id
     dataset=client.dataset(dataset_id=dataset_id).list_items().items
 
-    creator_info = [f"www.instagram.com/{item['username']}" for item in dataset if "username" in item]
+    creator_info = [f"https://www.instagram.com/{item['username']}/" for item in dataset if "username" in item]
     return creator_info
 
 
@@ -137,6 +159,7 @@ def Youtube_creator_finder():
               "regionCode": "IN",
               "publishedAfter": "2026-05-04T00:00:00Z",
               "publishedBefore": datetime.now(timezone.utc).isoformat(),
+              'videoDuration':'medium',
               "pageToken": token,
               "key": api_key,
           },
@@ -165,20 +188,38 @@ def Youtube_creator_finder():
           snip = v_item["snippet"]
           cid = snip.get("channelId")
 
-          if cid in seen:
+          if cid.lower() in seen:
             continue
 
-          desc = snip.get("description", "")
+          desc = snip.get("description", "").lower()
           handles = extract_instagram_handles(desc)
 
           if not handles:
             continue
-
-          seen.add(cid)
-          creator_info.extend(handles)
-
+          seen.add(cid.lower())
+          creator_info.extend(handles)  
       token = search_resp.get("nextPageToken")
       if not token:
         break
-
+    handle=set(creator_info)
+    creator_info=list(handle)
   return creator_info
+
+SCOPES = [
+    'https://www.googleapis.com/auth/gmail.send'
+]
+def get_gmail_service():
+    creds = None
+    # token.json stores the user's access and refresh tokens
+    import os
+    if os.path.exists('token.json'):
+        creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            flow = InstalledAppFlow.from_client_secrets_file('gmail_api_secrets.json', SCOPES)
+            creds = flow.run_local_server(port=0)
+        with open('token.json', 'w') as token:
+            token.write(creds.to_json())
+    return build('gmail', 'v1', credentials=creds)

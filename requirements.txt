@@ -1,3 +1,9 @@
 apify-client
 dotenv
 requests
+pymongo
+langgraph
+langgraph-checkpoint-sqlite
+google-auth 
+google-auth-oauthlib 
+google-api-python-client
