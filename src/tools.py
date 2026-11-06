@@ -85,21 +85,20 @@ def instagram_details_finder(url:list[str]):
 
         contact=extract_emails_from_bio(bio_text=item.get('biography',""))
 
-        if item.get('followersCount',0)<5000 or item.get('followersCount',0)>250000 or engagement<0.1 or len(contact)==0:
-            collection2.insert_one({"url": f'www.instagram.com/{item.get("username")}',
+        if item.get('followersCount',0)<5000 or item.get('followersCount',0)>250000 or engagement<0.01:
+            collection2.insert_one({"url": f'https://www.instagram.com/{item.get("username")}/',
                                     "full_name": item.get("fullName"),
-                                    'followers_issue':item.get('followersCount',0)<5000 or item.get('followersCount',0)>250000,
-                                    'engagement_issue':engagement<0.1,
-                                    'contact_found_issue':True if len(contact)==0 else False})
+                                    'followers_issue':item.get('followersCount',0),
+                                    'engagement_issue':f"{engagement*100}%"})
             continue
         if contact in list(collection1.find({},{'contact':1, "_id":0})):
             continue
-        seen.add(contact)
+        seen.add(contacts for contacts in contact)
         creator_dict = {
             "url": f'www.instagram.com/{item.get("username")}',
             "full_name": item.get("fullName"),
             "followers": item.get("followersCount"),
-            'contact': contact,
+            'contact': contact if contact else "Not found",
             "engagement": engagement,
             'latest_reel_caption': caption,
             'Contacted': False
@@ -107,7 +106,7 @@ def instagram_details_finder(url:list[str]):
     
         creator_info.append(creator_dict)
     if creator_info:
-        collection1.insert_many(creator_info)
+        collection1.insert_many([c.copy() for c in creator_info])
     return creator_info
 
 def instagram_influencer_finder():
@@ -197,7 +196,10 @@ def Youtube_creator_finder():
           if not handles:
             continue
           seen.add(cid.lower())
-          creator_info.extend(handles)  
+          creator_info.extend(
+    f"https://{handle}/"
+    for handle in handles
+)  
       token = search_resp.get("nextPageToken")
       if not token:
         break

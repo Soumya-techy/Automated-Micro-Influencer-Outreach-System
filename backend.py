@@ -5,7 +5,7 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from typing import TypedDict,Optional,Annotated
 from uuid import uuid4
 conn=sqlite3.connect('checkpointer.sqlite',check_same_thread=False)
-thread=uuid4()
+thread=str(uuid4())
 config={'configurable':{'thread_id':thread}}
 checkpointer=SqliteSaver(conn=conn)
 
