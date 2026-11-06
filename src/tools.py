@@ -234,4 +234,3 @@ def get_gmail_service():
         with open('token.json', 'w') as token:
             token.write(creds.to_json())
     return build('gmail', 'v1', credentials=creds)
-instagram_details_finder(url=['https://www.instagram.com/manmakeup.artist/'])
