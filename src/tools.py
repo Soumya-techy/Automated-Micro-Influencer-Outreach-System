@@ -15,7 +15,7 @@ load_dotenv()
 
 client=MongoClient('mongodb://localhost:27017/')
 db=client['Influencer_data']
-collection1=db['Aceepted']
+collection1=db['Accepted']
 collection2=db['Rejected']
 
 def extract_emails_from_bio(bio_text):
@@ -55,10 +55,17 @@ def extract_instagram_handles(text: str) -> list[str]:
 
 def calc_engagement(posts, followers):
     posts = posts[:5]
+    usable=[]
     if not posts or not followers:
         return 0.0
-    total = sum(max(p.get("likesCount") or 0, 0) + (p.get("commentsCount") or 0) for p in posts)
-    return (total / len(posts)) / followers 
+    for p in posts:
+       if p.get("likesCount",-1)==-1 or p.get("commentsCount",-1)==-1:
+          continue
+       usable.append((p.get("likesCount")+p.get("commentsCount")))
+    if usable:
+        return (sum(usable)/len(usable))/followers
+    else:
+       return 0.0 
 
 def instagram_details_finder(url:list[str]):
     creator_info=[]
@@ -86,11 +93,14 @@ def instagram_details_finder(url:list[str]):
         contact=extract_emails_from_bio(bio_text=item.get('biography',""))
 
         if item.get('followersCount',0)<5000 or item.get('followersCount',0)>250000 or engagement<0.01:
-            collection2.insert_one({"url": f'https://www.instagram.com/{item.get("username")}/',
+            if engagement==0.0 and item.get('followersCount',0)>5000 and item.get('followersCount',0)<250000:
+               pass
+            elif item.get('followersCount',0)<5000 or item.get('followersCount',0)>250000 or engagement<0.01:
+                collection2.insert_one({"url": f'https://www.instagram.com/{item.get("username")}/',
                                     "full_name": item.get("fullName"),
-                                    'followers_issue':item.get('followersCount',0),
-                                    'engagement_issue':f"{engagement*100}%"})
-            continue
+                                    'followers_issue':item.get('followersCount',0) if item.get('followersCount',0)<5000 or item.get('followersCount',0)>250000 else "NO",
+                                    'engagement_issue':f"{engagement*100}%" if engagement<0.01 else "NO"})
+                continue
         if contact in list(collection1.find({},{'contact':1, "_id":0})):
             continue
         seen.add(contacts for contacts in contact)
@@ -99,7 +109,7 @@ def instagram_details_finder(url:list[str]):
             "full_name": item.get("fullName"),
             "followers": item.get("followersCount"),
             'contact': contact if contact else "Not found",
-            "engagement": engagement,
+            "engagement": engagement if engagement!=0 else "Not found",
             'latest_reel_caption': caption,
             'Contacted': False
         }
@@ -113,10 +123,10 @@ def instagram_influencer_finder():
     client=ApifyClient(os.getenv('APIFY_API_TOKEN'))
     run_input={
   "hashtags": [
-    "beauty","makeup","glowup","skincare","fashion"
+    "indianbeautyblogger","desimakeup","delhibeautyblogger","indianskincareblogger","desigrwm"
   ],
   "maxInfluencers": 12,
-  "minFollowers": 500,
+  "minFollowers": 5000,
   "crawlWebsite": False,
   "product": "instagram-influencers"
 }
@@ -135,7 +145,7 @@ def Youtube_creator_finder():
       "affordable makeup haul",
       "skincare routine Hindi",
       "lehenga lookbook",
-      "drugstore skincare India",
+      "indian beauty blogger","desi makeup tutorial","delhibeautyblogger","indian skincare blogger","desi get ready with me"
   ]
   seen = set()
   creator_info = []
@@ -174,7 +184,7 @@ def Youtube_creator_finder():
           video_ids.append(vid)
 
       if not video_ids:
-        continue
+        break
 
       for i in range(0, len(video_ids), 50):
         batch_ids = ",".join(video_ids[i : i + 50])
@@ -197,8 +207,7 @@ def Youtube_creator_finder():
             continue
           seen.add(cid.lower())
           creator_info.extend(
-    f"https://{handle}/"
-    for handle in handles
+    f"https://{handle}/" for handle in handles
 )  
       token = search_resp.get("nextPageToken")
       if not token:
@@ -225,3 +234,4 @@ def get_gmail_service():
         with open('token.json', 'w') as token:
             token.write(creds.to_json())
     return build('gmail', 'v1', credentials=creds)
+instagram_details_finder(url=['https://www.instagram.com/manmakeup.artist/'])
