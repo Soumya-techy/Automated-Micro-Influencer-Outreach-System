@@ -109,7 +109,7 @@ def instagram_details_finder(url:list[str]):
             "full_name": item.get("fullName"),
             "followers": item.get("followersCount"),
             'contact': contact if contact else "Not found",
-            "engagement": engagement if engagement!=0 else "Not found",
+            "engagement": f"{engagement*100}%" if engagement!=0 else "Not found",
             'latest_reel_caption': caption,
             'Contacted': False
         }
@@ -234,3 +234,13 @@ def get_gmail_service():
         with open('token.json', 'w') as token:
             token.write(creds.to_json())
     return build('gmail', 'v1', credentials=creds)
+
+def send_gmail(to: str, subject: str, body: str):
+        message = MIMEText(body)
+        message['to'] = to
+        message['subject'] = subject
+        
+        raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode('utf-8')
+        body_payload = {'raw': raw_message}
+        service = get_gmail_service()
+        result = service.users().messages().send(userId="me", body=body_payload).execute()
